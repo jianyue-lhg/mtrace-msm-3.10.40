@@ -176,7 +176,7 @@ static void req_bio_endio(struct request *rq, struct bio *bio,
 	/* don't actually finish bio if it's part of flush sequence */
 	if (bio->bi_size == 0 && !(rq->cmd_flags & REQ_FLUSH_SEQ)){
 		//mtrace --begin
-		mtrace_bio_collect(bio);
+		//mtrace_bio_collect(bio);
 		//mtrace --end
 		bio_endio(bio, error);
 	}

@@ -151,7 +151,7 @@ int calc_md5_list_v2(int size, unsigned char *data_ptr, unsigned char *md5list)
  *  @message - the string to send
  *  @dstPID  - the destination pid
  */
-void sendnlmsg(struct sock *_fd, char *message,int dstPID)
+void sendnlmsg(struct sock *_fd, char *message,__u32 dstPID)
 {
     struct sk_buff *skb;
     struct nlmsghdr *nlh;

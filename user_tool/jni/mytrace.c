@@ -141,6 +141,7 @@ void worker(FILE* fp){
 	while(1){
 		memset(nlh, 0, MSG_RECV_LEN);
 		recvfrom(sockfd, nlh, NLMSG_LENGTH(MSG_RECV_LEN), 0, (struct sockaddr*)(&dest_addr), NULL);//flag = 0: this will wait here until new msg come
+		printf("recv - %s\n", NLMSG_DATA(nlh));
 		if(strcmp(NLMSG_DATA(nlh),"exit") == 0){
 	    //	printf("recv - exit.\n");
             break;
@@ -150,8 +151,6 @@ void worker(FILE* fp){
 		fprintf(fp,"%s\n",NLMSG_DATA(nlh));
 	}
 	printf("worker exit.\n");
-	
-
 }
 FILE* file_setup(){
 	FILE *fp;
