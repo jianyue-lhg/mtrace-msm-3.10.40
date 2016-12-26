@@ -1,0 +1,4 @@
+*.o
+*.d
+user_tool/libs/
+user_tool/obj/
