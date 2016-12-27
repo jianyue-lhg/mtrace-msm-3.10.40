@@ -1,0 +1,1 @@
+obj-y := mtrace_netlink_test.o
