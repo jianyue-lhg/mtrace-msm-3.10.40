@@ -22,6 +22,8 @@
 #define ERR_THREAD 		15
 #define ERR_NLH_ALLOC 	16
 #define ERR_MSG_SEND 	17
+#define ERR_MSG_RECV	18
+
 #define DEBUG_ON
 
 struct mytrace{
@@ -29,7 +31,8 @@ struct mytrace{
 	char *m_fout_name;	//file name output into
 	FILE* m_fp;
 	int m_secs;			//run how many second for test
-	
+
+	int verbose;
 
 	/*run-time data*/
 	unsigned long long m_trace_num;	//
@@ -48,7 +51,7 @@ struct mytrace u_m1;//all zero
 
 void usage()
 {
-	printf("usage: mytrace -o <filename> -w <secs>\n");
+	printf("usage: mytrace -o <filename> -w <secs> [-v]\n");
 }
 
 
@@ -75,6 +78,7 @@ void errsys(int err, char *errstr, struct mytrace *_m)
 		case ERR_THREAD:		//
 		case ERR_NLH_ALLOC:		//
 		case ERR_MSG_SEND:		//
+		case ERR_MSG_RECV:		// from the worker thread.
 			perror(errstr);
 			mytrace_release(_m);
 			break;
@@ -155,6 +159,8 @@ void mytrace_arg_handle(struct mytrace* _m, int argc, char* argv[])
 				case 'w':
 					_m->m_secs = atoi(argv[++i]);
 					break;
+				case 'v':
+					_m->verbose = 1;
 				default:
 					errsys(ERR_ARGV, argv[i], _m);
 			}
@@ -170,6 +176,7 @@ void worker(struct mytrace *_m)
 	struct iovec iov;
 	struct msghdr msg;
 	int err;
+	int reminder_thresolds = 10;
 	/*work thread - data path*/
 
 	nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MSG_RECV_LEN));
@@ -193,16 +200,26 @@ void worker(struct mytrace *_m)
 	
 
 	while(1){
-		recvmsg(_m->m_sockfd, &msg, 0);
+		err = recvmsg(_m->m_sockfd, &msg, 0);
+		if(err < 0){
+			errsys(ERR_MSG_RECV, "recvmsg", _m);
+		}
 		
-		printf("[mtrace user] recv - %s\n", (char *)NLMSG_DATA(nlh));
-		
+		if(_m->verbose){		
+			printf("[mtrace user] recv - %s\n", (char *)NLMSG_DATA(nlh));
+		}
+
 		if(strcmp((char *)NLMSG_DATA(nlh),"exit") == 0){
-	    //	printf("recv - exit.\n");
             break;
 		}
 		_m->m_trace_num++;
 		fprintf(_m->m_fp,"%s\n",(char *)NLMSG_DATA(nlh));
+
+		/*print some reminder info*/
+		if(_m->m_trace_num > reminder_thresolds){
+			printf("[mtrace user] I've recv %d traces.\n", reminder_thresolds);
+			reminder_thresolds *= 2;
+		}
 	}
 	printf("[mtrace user] worker exit.\n");
 }

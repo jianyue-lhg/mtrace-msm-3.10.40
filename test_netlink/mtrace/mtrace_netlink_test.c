@@ -70,11 +70,17 @@ OUT:
 void mtrace_bio_collect(struct bio *bio)
 {
 //	bio_mt_t meta;
+	char b[32];
+	char buf[64];
 	struct mtrace *_m = &m1;
+	
 	if(bio->bytes_n && MTRACE_STARTED(&m1)){
 #ifdef MTRACE_DEBUG_ON
 		printk(KERN_INFO "[mtrace] - collected.\n");
-		mtrace_send_msg(_m, "bio1");
+		
+		memset(buf, 0, sizeof(buf));
+		sprintf(buf, "%s: bio", bdevname(bio->bi_bdev, b));
+		mtrace_send_msg(_m, buf);
 #endif
 	}
 }

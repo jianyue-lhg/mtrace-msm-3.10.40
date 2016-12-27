@@ -51,12 +51,12 @@ struct mtrace{
 
 
 
-typedef struct meta{
+struct bio_meta{
     struct timespec delay;  //delay
     char RW;                //RW
     unsigned long bi_sector;
     unsigned int bytes_n;
     char comm[18];
-}bio_mt_t;
+};
 
 #endif
