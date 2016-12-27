@@ -47,14 +47,13 @@ static void errsys(int err, char *errstr){
 	exit(-1);
 }
 
-static void arg_handle(int argc, char* argv[]){
+static void arg_handle(int argc, char* argv[])
+{
 	int i;
-	if(argc != 5){
-		errsys(ERR_ARGV, "bad parameters");
-	}
-
+	if(argc != 5){ errsys(ERR_ARGV, "bad parameters"); }
 	for(i = 1;i < argc; i++){
-		if(argv[i][0] == '-'){
+		if(argv[i][0] == '-')
+		{
 			switch(argv[i][1]){
 				case 'o':
 					file_output = argv[++i];
@@ -65,9 +64,9 @@ static void arg_handle(int argc, char* argv[]){
 				default:
 					errsys(ERR_ARGV, argv[i]);
 			}
-		}
-		else
+		}else{
 			errsys(ERR_ARGV, argv[i]);
+		}
 	}
 }
 

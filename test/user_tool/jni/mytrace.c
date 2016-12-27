@@ -1,220 +1,302 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>
 #include <string.h>
+
+#include <unistd.h>
+#include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <linux/netlink.h>
-#include <signal.h>
 #include <pthread.h>
+
 
 #define NETLINK_MYTRACE 28
 
 #define MSG_SEND_LEN 10
 #define MSG_RECV_LEN 4096
 
-#define ERR_NETLINK 10
-#define ERR_ARGV	11
-#define ERR_THREAD	12
-#define ERR_FILE	13
+#define ERR_ARGV		11
+#define ERR_FILE		12
+#define ERR_SOCK_ALLOC	13
+#define ERR_SOCK_BIND 	14
+#define ERR_THREAD 		15
+#define ERR_NLH_ALLOC 	16
+#define ERR_MSG_SEND 	17
+#define DEBUG_ON
 
-char *file_output;
-struct timeval start;
-int secs, sockfd; 
-unsigned long long traceNum = 0;
+struct mytrace{
+	/*settings*/
+	char *m_fout_name;	//file name output into
+	FILE* m_fp;
+	int m_secs;			//run how many second for test
+	
 
-struct sockaddr_nl dest_addr;
+	/*run-time data*/
+	unsigned long long m_trace_num;	//
+	struct timeval m_startime;		//
 
-static void usage(){
+
+	/*sock things*/
+	int m_sockfd; 
+	struct sockaddr_nl m_src_addr;
+	struct sockaddr_nl m_dest_addr;	
+	pid_t pid;
+};
+
+
+struct mytrace u_m1;//all zero
+
+void usage()
+{
 	printf("usage: mytrace -o <filename> -w <secs>\n");
 }
 
-static void errsys(int err, char *errstr){
+
+void mytrace_release(struct mytrace *_m)
+{
+	if(_m->m_fp)
+		fclose(_m->m_fp);
+	if(_m->m_sockfd > 0)
+		close(_m->m_sockfd);/**/
+}
+
+void errsys(int err, char *errstr, struct mytrace *_m)
+{
 	switch(err){
-		case ERR_NETLINK:
-			perror(errstr);
-			break;
-		case ERR_ARGV:
+		case ERR_ARGV:			//
 			printf("invalid parameter: %s!\n", errstr);
 			usage();
 			break;
-		case ERR_THREAD:
+		case ERR_FILE:			//
 			perror(errstr);
 			break;
-		case ERR_FILE:
+		case ERR_SOCK_ALLOC:	//
+		case ERR_SOCK_BIND:		//
+		case ERR_THREAD:		//
+		case ERR_NLH_ALLOC:		//
+		case ERR_MSG_SEND:		//
 			perror(errstr);
+			mytrace_release(_m);
 			break;
 	}
 	exit(-1);
 }
 
-static void arg_handle(int argc, char* argv[]){
-	int i;
-	if(argc != 5){
-		errsys(ERR_ARGV, "bad parameters");
-	}
-
-	for(i = 1;i < argc; i++){
-		if(argv[i][0] == '-'){
-			switch(argv[i][1]){
-				case 'o':
-					file_output = argv[++i];
-					break;
-				case 'w':
-					secs = atoi(argv[++i]);
-					break;
-				default:
-					errsys(ERR_ARGV, argv[i]);
-			}
-		}
-		else
-			errsys(ERR_ARGV, argv[i]);
-	}
-}
-
-/*
-*	create netlink sock
-*	bind it with local pid addr
-*	set kernel addr
-*/
-static void netlink_setup(){
-	/*create a sock*/
-	sockfd = socket(PF_NETLINK, SOCK_RAW, NETLINK_MYTRACE);
-	if(sockfd < 0){
-		errsys(ERR_NETLINK, "create sock error");
-	}
-	/*no bind*/
-
-	/*set destination*/
-	memset(&dest_addr, 0, sizeof(dest_addr));
-	dest_addr.nl_family = AF_NETLINK;
-	dest_addr.nl_pid = 0;
-	dest_addr.nl_groups = 0;
-}
-
-static void send_to_kern(char* cmd){
-	struct nlmsghdr *nlh = NULL;
-	nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MSG_SEND_LEN));
-	if(nlh == NULL){
-		errsys(ERR_NETLINK, "nlh alloc mem error");
-	}
-
-	memset(nlh, 0, MSG_SEND_LEN);
-
-	nlh->nlmsg_len = NLMSG_SPACE(MSG_SEND_LEN);
-	nlh->nlmsg_pid = getpid();
-	nlh->nlmsg_type = NLMSG_NOOP;
-	nlh->nlmsg_flags = 0;
-
-	strcpy(NLMSG_DATA(nlh), cmd);
-
-	sendto(sockfd, nlh, NLMSG_LENGTH(MSG_SEND_LEN), 0, (struct sockaddr*)(&dest_addr), sizeof(dest_addr));
-
-	free(nlh);
-}
-/*
-void handle_quit(int signo){
-	printf("%d going to exit.\n", pthread_self());
-	pthread_exit(NULL);
-}
-*/
-int stop_flag = 0;
-
-void worker(FILE* fp){
-	/*work thread*/
-
-	struct nlmsghdr *nlh = NULL;
-	nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MSG_RECV_LEN));
-	if(nlh == NULL){
-		errsys(ERR_NETLINK, "nlh alloc mem error");
-	}
-
-	printf("thread num: %d started up.\n", pthread_self());
-	/*setup SIGQUIT handler*/
-/*	struct sigaction actions;  
-	memset(&actions, 0, sizeof(actions));   
-	sigemptyset(&actions.sa_mask);
-	actions.sa_flags = 0;   
-	actions.sa_handler = handle_quit;  
-	sigaction(SIGUSR1,&actions,NULL); */
-
-	/*recv traces from kernel*/
-	while(1){
-		memset(nlh, 0, MSG_RECV_LEN);
-		recvfrom(sockfd, nlh, NLMSG_LENGTH(MSG_RECV_LEN), 0, (struct sockaddr*)(&dest_addr), NULL);//flag = 0: this will wait here until new msg come
-		printf("recv - %s\n", NLMSG_DATA(nlh));
-		if(strcmp(NLMSG_DATA(nlh),"exit") == 0){
-	    //	printf("recv - exit.\n");
-            break;
-		}
-		traceNum++;
-		//printf("rc:%s\n", NLMSG_DATA(nlh));
-		fprintf(fp,"%s\n",NLMSG_DATA(nlh));
-	}
-	printf("worker exit.\n");
-}
-FILE* file_setup(){
+FILE* _file_setup(struct mytrace *_m)
+{
 	FILE *fp;
-	fp = fopen(file_output,"w+");
+	fp = fopen(_m->m_fout_name, "w+");
 	if(fp == NULL){
-		errsys(ERR_FILE, "fopen error");
+		errsys(ERR_FILE, "fopen error", _m);
 	}
+	_m->m_fp = fp;
 	return fp;
 }
 
 
+int _alloc_sock()
+{
+	return socket(PF_NETLINK, SOCK_RAW, NETLINK_MYTRACE);
+}
 
-static void trace_begin(){
+void _netlink_setup_partial(struct mytrace *_m)
+{
+	int err;
+	_m->m_sockfd = _alloc_sock();
+	if(_m->m_sockfd < 0){
+		goto ALLOC_ERR;
+	}
 	
+	/*set destination*/
+	memset(&(_m->m_dest_addr), 0, sizeof(struct sockaddr_nl));
+	_m->m_dest_addr.nl_family = AF_NETLINK;
+	_m->m_dest_addr.nl_pid = 0;
+	_m->m_dest_addr.nl_groups = 0;
+
+	/*set source*/
+	memset(&(_m->m_src_addr), 0, sizeof(struct sockaddr_nl));
+	_m->m_src_addr.nl_family = AF_NETLINK;
+	_m->m_src_addr.nl_pid = _m->pid;/* self pid */
+
+	err = bind(_m->m_sockfd, (struct sockaddr*)&(_m->m_src_addr), sizeof(struct sockaddr_nl));
+	if(err){
+		errsys(ERR_SOCK_BIND, "bind m_sockfd", _m);
+	}
+	return ;
+
+ALLOC_ERR:
+	errsys(ERR_SOCK_ALLOC, "sock alloc", _m);
+}
+
+
+
+void mytrace_init(struct mytrace *_m)
+{
+	_m->m_trace_num = 0;
+	_m->pid = getpid();
+	_file_setup(_m);
+	_netlink_setup_partial(_m);
+	gettimeofday(&(_m->m_startime), NULL);
+}
+
+
+
+void mytrace_arg_handle(struct mytrace* _m, int argc, char* argv[])
+{
+	int i;
+	if(argc != 5){ errsys(ERR_ARGV, "bad parameters", _m); }
+	for(i = 1;i < argc; i++)
+	{
+		if(argv[i][0] == '-'){
+			switch(argv[i][1]){
+				case 'o':
+					_m->m_fout_name = argv[++i];
+					break;
+				case 'w':
+					_m->m_secs = atoi(argv[++i]);
+					break;
+				default:
+					errsys(ERR_ARGV, argv[i], _m);
+			}
+		}else{
+			errsys(ERR_ARGV, argv[i], _m);
+		}
+	}
+}
+
+void worker(struct mytrace *_m)
+{
+	struct nlmsghdr *nlh = NULL;	
+	struct iovec iov;
+	struct msghdr msg;
+	int err;
+	/*work thread - data path*/
+
+	nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MSG_RECV_LEN));
+	if(nlh == NULL){
+		errsys(ERR_NLH_ALLOC, "nlh alloc mem error", _m);
+	}
+	
+	memset(nlh, 0, NLMSG_SPACE(MSG_RECV_LEN));
+	nlh->nlmsg_len = NLMSG_SPACE(MSG_RECV_LEN);
+	nlh->nlmsg_pid = _m->pid;
+	nlh->nlmsg_flags = 0;
+
+	iov.iov_base = (void *)nlh;
+	iov.iov_len = nlh->nlmsg_len;
+
+	msg.msg_name = (void *)&(_m->m_dest_addr);
+	msg.msg_namelen = sizeof(struct sockaddr_nl);
+
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	
+
+	while(1){
+		recvmsg(_m->m_sockfd, &msg, 0);
+		
+		printf("[mtrace user] recv - %s\n", (char *)NLMSG_DATA(nlh));
+		
+		if(strcmp((char *)NLMSG_DATA(nlh),"exit") == 0){
+	    //	printf("recv - exit.\n");
+            break;
+		}
+		_m->m_trace_num++;
+		fprintf(_m->m_fp,"%s\n",(char *)NLMSG_DATA(nlh));
+	}
+	printf("[mtrace user] worker exit.\n");
+}
+
+void send_to_kern(struct mytrace *_m, char* cmd)
+{
+	int err;
+	struct nlmsghdr *nlh = NULL;
+	struct iovec iov;
+	struct msghdr msg;
+#ifdef DEBUG_ON
+	printf("[mtrace user] sending msg's length: %d\n", strlen(cmd));
+#endif	
+	nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MSG_SEND_LEN));
+	if(nlh == NULL){
+		errsys(ERR_NLH_ALLOC, "nlh alloc mem error", _m);
+	}
+
+	memset(nlh, 0, NLMSG_SPACE(MSG_SEND_LEN));
+
+	nlh->nlmsg_len = NLMSG_SPACE(MSG_SEND_LEN);
+	nlh->nlmsg_pid = _m->pid;
+	nlh->nlmsg_type = NLMSG_NOOP;
+	nlh->nlmsg_flags = 0;
+
+	strcpy((char *)NLMSG_DATA(nlh), cmd);
+
+	
+	iov.iov_base = (void *)nlh;
+	iov.iov_len = nlh->nlmsg_len;
+
+	memset(&msg, 0 ,sizeof(msg));//bugfix: http://blog.chinaunix.net/uid-14327709-id-3037069.html
+
+	msg.msg_name = (void *)(&(_m->m_dest_addr));
+	msg.msg_namelen = sizeof(struct sockaddr_nl);
+
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	err = sendmsg(_m->m_sockfd, &msg, 0);
+	if(err < 0){
+		errsys(ERR_MSG_SEND, "sendmsg", _m);
+	}else{
+		printf("[mtrace user] send ok!\n");
+	}
+	//free(nlh);
+}
+
+void trace_begin(struct mytrace *_m)
+{
 	struct timeval now;
 	pthread_t worker_thread;
-	int ret;
-	FILE *fp;
+	int err;
 
-	gettimeofday(&start, NULL);	
-	
 	/*setup tracer worker*/
-	printf("start mytracer.\n");
-	netlink_setup();
-	fp = file_setup();
-
-
-
-	pthread_create(&worker_thread, NULL, (void *)(&worker), fp);
+	printf("[mtrace user] start work thread.\n");
+	err = pthread_create(&worker_thread, NULL, (void *)(&worker), _m);
+	if(err){
+		errsys(ERR_THREAD, "pthread_create", _m);
+	}
 
 	/*send cmd to start up tracer*/
-	send_to_kern("start\0");
+	send_to_kern(_m, "start\0");
 
 	while(1){
 		/*here is a timer*/
 		sleep(5);
 		gettimeofday(&now, NULL);
-		if(now.tv_sec - start.tv_sec > secs){
-			printf("stop mytracer.\n");
+		if(now.tv_sec - _m->m_startime.tv_sec > _m->m_secs){
+			printf("[mtrace user] stop mytracer getting out of loop.\n");
             goto TIMEUP;
 			break;
 		}
 	}
-	/*timeout - send cmd to stop tracer*/
-    stop_flag = 1;
 
 TIMEUP:
-	send_to_kern("stop\0");
-	printf("I want to stop.\n");
-	
-	ret = pthread_join(worker_thread, NULL);
-	if(ret != 0){
-		errsys(ERR_THREAD, "wait for worker error");
+	printf("[mtrace user] stop mytracer get out of loop.\n");
+	send_to_kern(_m, "stop\0");
+	err = pthread_join(worker_thread, NULL);
+	if(err){
+		errsys(ERR_THREAD, "wait for worker error", _m);
 	}
-	printf("%lld events.\n",traceNum);
-	fclose(fp);
-	close(sockfd);/**/
+	printf("[mtrace user] %lld events.\n",_m->m_trace_num);
 }
 
 
 int main(int argc, char* argv[])
 {
-	arg_handle(argc, argv);
-	printf("file_output: %s, wait: %d\n", file_output, secs);
-	trace_begin();
+	memset(&u_m1, 0, sizeof(struct mytrace));
+	mytrace_arg_handle(&u_m1, argc, argv);
+#ifdef DEBUG_ON
+	printf("[mtrace user] file_output: %s, wait: %d\n", u_m1.m_fout_name , u_m1.m_secs);
+#endif
+	mytrace_init(&u_m1);
+	trace_begin(&u_m1);
+	mytrace_release(&u_m1);
     return 0;
 }

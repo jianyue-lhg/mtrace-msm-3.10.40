@@ -5,7 +5,7 @@
 #include <linux/types.h>
 #include <linux/kernel.h>
 
-#include <net/sock.h>           //struct sock nlmsg_put
+#include <net/sock.h>           //
 #include <linux/netlink.h>		//
 
 #include <linux/time.h>			//struct timespec
