@@ -32,7 +32,7 @@ void mtrace_send_msg(struct mtrace *_m, const char * _payload)
 {
 	struct sk_buff *skb_out;
 	struct nlmsghdr *nlh;
-	int payload_size = strlen(_payload);
+	int payload_size = strlen(_payload) + 1;//for the \0
 	int err = 0;
 	
 	skb_out = nlmsg_new(payload_size , GFP_ATOMIC);

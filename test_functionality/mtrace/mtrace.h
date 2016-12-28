@@ -14,11 +14,13 @@
 struct mtrace{
 	int has_inited;
 	int state;
+	int threads_num;
 	struct sock *nl_mtrace_fd;
 	struct task_struct *task_rm;
 
 	struct timespec start_time;
     __u32 uid;
+	const char* bdev;
 };
 
 #define E_SOCK_INIT 1 
@@ -51,12 +53,15 @@ struct mtrace{
 
 
 
-struct bio_meta{
+typedef struct meta{
+	unsigned int plen;
     struct timespec delay;  //delay
     char RW;                //RW
     unsigned long bi_sector;
     unsigned int bytes_n;
     char comm[18];
-};
+	char b[32];
+	unsigned char md5[16];
+}bio_mt_t;
 
 #endif

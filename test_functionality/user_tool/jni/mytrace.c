@@ -22,8 +22,6 @@
 #define ERR_THREAD 		15
 #define ERR_NLH_ALLOC 	16
 #define ERR_MSG_SEND 	17
-#define ERR_MSG_RECV	18
-
 #define DEBUG_ON
 
 struct mytrace{
@@ -31,8 +29,7 @@ struct mytrace{
 	char *m_fout_name;	//file name output into
 	FILE* m_fp;
 	int m_secs;			//run how many second for test
-
-	int verbose;
+	
 
 	/*run-time data*/
 	unsigned long long m_trace_num;	//
@@ -51,7 +48,7 @@ struct mytrace u_m1;//all zero
 
 void usage()
 {
-	printf("usage: mytrace -o <filename> -w <secs> [-v]\n");
+	printf("usage: mytrace -o <filename> -w <secs>\n");
 }
 
 
@@ -78,7 +75,6 @@ void errsys(int err, char *errstr, struct mytrace *_m)
 		case ERR_THREAD:		//
 		case ERR_NLH_ALLOC:		//
 		case ERR_MSG_SEND:		//
-		case ERR_MSG_RECV:		// from the worker thread.
 			perror(errstr);
 			mytrace_release(_m);
 			break;
@@ -159,8 +155,6 @@ void mytrace_arg_handle(struct mytrace* _m, int argc, char* argv[])
 				case 'w':
 					_m->m_secs = atoi(argv[++i]);
 					break;
-				case 'v':
-					_m->verbose = 1;
 				default:
 					errsys(ERR_ARGV, argv[i], _m);
 			}
@@ -170,18 +164,72 @@ void mytrace_arg_handle(struct mytrace* _m, int argc, char* argv[])
 	}
 }
 
+struct payload{
+	unsigned int plen;
+	char cmd[10];
+};
+
+typedef struct meta{
+	unsigned int 	plen;
+    struct timespec delay;  //delay
+    char 			RW;                //RW
+    unsigned long 	bi_sector;
+    unsigned int	bytes_n;
+    char 			comm[18];
+	char 			b[32];
+	unsigned char 	md5[16];
+}bio_mt_t;
+
+void md5_16B_to_str(unsigned char *md5, char *str)
+{
+	int i;
+	for(i = 0; i < 16; i++){
+		sprintf(str + 2 * i, "%02x", *(md5 + i));
+	}
+	md5[32] = '\0';
+}
+
+void parse_trace(bio_mt_t *t, char* msg, char *md5str)
+{
+	md5_16B_to_str(t->md5, md5str);
+	sprintf(msg, "%5ld.%-10ld,%c,%12lu,%10d,%15s,%s,%s\n", 
+		t->delay.tv_sec, t->delay.tv_nsec, 
+		t->RW, t->bi_sector, t->bytes_n, t->comm, 
+		t->b, md5str);
+	printf("[mtrace user] %s\n", md5str);
+}
+void parse_msg(void *head, char* msg, char* md5str)
+{
+	unsigned int len;
+	memcpy((void *)&len ,head, sizeof(unsigned int));
+	printf("size of payload: %u\n", len);
+	if(len < 20){// is a cmd
+		sprintf(msg, "%s", ((struct payload *)head)->cmd);
+		printf("[mtrace user] parse - %s\n", msg);
+	}else{//is a trace
+		parse_trace(((bio_mt_t *)head), msg, md5str);
+	}
+	
+}
+
+
 void worker(struct mytrace *_m)
 {
+	char md5str[33];
 	struct nlmsghdr *nlh = NULL;	
 	struct iovec iov;
 	struct msghdr msg;
+	char *msgo = NULL;
 	int err;
-	int reminder_thresolds = 10;
 	/*work thread - data path*/
 
 	nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MSG_RECV_LEN));
 	if(nlh == NULL){
 		errsys(ERR_NLH_ALLOC, "nlh alloc mem error", _m);
+	}
+	msgo = (char *)malloc(MSG_RECV_LEN);
+	if(msgo == NULL){
+		errsys(ERR_NLH_ALLOC, "msgo alloc mem error", _m);
 	}
 	
 	memset(nlh, 0, NLMSG_SPACE(MSG_RECV_LEN));
@@ -200,26 +248,18 @@ void worker(struct mytrace *_m)
 	
 
 	while(1){
-		err = recvmsg(_m->m_sockfd, &msg, 0);
-		if(err < 0){
-			errsys(ERR_MSG_RECV, "recvmsg", _m);
-		}
+		recvmsg(_m->m_sockfd, &msg, 0);
 		
-		if(_m->verbose){		
-			printf("[mtrace user] recv - %s\n", (char *)NLMSG_DATA(nlh));
-		}
-
-		if(strcmp((char *)NLMSG_DATA(nlh),"exit") == 0){
+		//printf("[mtrace user] recv - %s\n", (char *)NLMSG_DATA(nlh));
+		/*parse*/
+		parse_msg(NLMSG_DATA(nlh), msgo, md5str);
+		
+		if(strcmp(msgo,"exit") == 0){
+	    //	printf("recv - exit.\n");
             break;
 		}
 		_m->m_trace_num++;
-		fprintf(_m->m_fp,"%s\n",(char *)NLMSG_DATA(nlh));
-
-		/*print some reminder info*/
-		if(_m->m_trace_num > reminder_thresolds){
-			printf("[mtrace user] I've recv %d traces.\n", reminder_thresolds);
-			reminder_thresolds *= 2;
-		}
+		fprintf(_m->m_fp,"%s\n",msgo);
 	}
 	printf("[mtrace user] worker exit.\n");
 }
